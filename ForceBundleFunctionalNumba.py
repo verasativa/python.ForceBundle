@@ -291,30 +291,55 @@ def forcebundle(edges, S_initial, I_initial, I_rate, P_initial, P_rate, C, K):
     #self.update_edge_divisions(P)
     #self.compute_compatibility_lists()
 
+
+    # TODO: remove range(0, n) to range(n)
     for cycle in tqdm(range(0, C), unit='cycle'):
+        subdivision_points_for_edge, S, P, I = apply_forces_cycle(edges, subdivision_points_for_edge, compatibility_list_for_edge, K, P, P_rate, I, I_rate, S)
     #for cycle in range(0, C):
-        for iteration in range(math.ceil(I)):
-            forces = {}
-            for edge_idx in range(0, len(edges)):
-                forces[edge_idx] = apply_resulting_forces_on_subdivision_points(edges, subdivision_points_for_edge, compatibility_list_for_edge, edge_idx, K, P, S)
-                for i in range(P):
-                    subdivision_points_for_edge[edge_idx][i] = Point(
-                        subdivision_points_for_edge[edge_idx][i].x + forces[edge_idx][i].x,
-                        subdivision_points_for_edge[edge_idx][i].y + forces[edge_idx][i].y
-                    )
-                    #self.subdivision_points_for_edge[e][i].x += forces[e][i].x
-                    #self.subdivision_points_for_edge[e][i].y += forces[e][i].y
-
-        # prepare for next cycle
-        S = S / 2
-        P = P * P_rate
-        I = I * I_rate
-
-        subdivision_points_for_edge = update_edge_divisions(edges, subdivision_points_for_edge, P)
-        print('C: {} P: {} S: {}'.format(cycle, P, S))
+        # for iteration in range(math.ceil(I)):
+        #     forces = {}
+        #     for edge_idx in range(0, len(edges)):
+        #         forces[edge_idx] = apply_resulting_forces_on_subdivision_points(edges, subdivision_points_for_edge, compatibility_list_for_edge, edge_idx, K, P, S)
+        #         for i in range(P):
+        #             subdivision_points_for_edge[edge_idx][i] = Point(
+        #                 subdivision_points_for_edge[edge_idx][i].x + forces[edge_idx][i].x,
+        #                 subdivision_points_for_edge[edge_idx][i].y + forces[edge_idx][i].y
+        #             )
+        #             #self.subdivision_points_for_edge[e][i].x += forces[e][i].x
+        #             #self.subdivision_points_for_edge[e][i].y += forces[e][i].y
+        #
+        # # prepare for next cycle
+        # S = S / 2
+        # P = P * P_rate
+        # I = I * I_rate
+        #
+        # subdivision_points_for_edge = update_edge_divisions(edges, subdivision_points_for_edge, P)
+        # print('C: {} P: {} S: {}'.format(cycle, P, S))
 
     return subdivision_points_for_edge
 
+@jit(nopython=True)
+def apply_forces_cycle(edges, subdivision_points_for_edge, compatibility_list_for_edge, K, P, P_rate, I, I_rate, S):
+    for iteration in range(math.ceil(I)):
+        forces = List()
+        for edge_idx in range(0, len(edges)):
+            forces.append(apply_resulting_forces_on_subdivision_points(edges, subdivision_points_for_edge,
+                                                                            compatibility_list_for_edge, edge_idx, K, P,
+                                                                            S))
+            for i in range(P):
+                subdivision_points_for_edge[edge_idx][i] = Point(
+                    subdivision_points_for_edge[edge_idx][i].x + forces[edge_idx][i].x,
+                    subdivision_points_for_edge[edge_idx][i].y + forces[edge_idx][i].y
+                )
+                # self.subdivision_points_for_edge[e][i].x += forces[e][i].x
+                # self.subdivision_points_for_edge[e][i].y += forces[e][i].y
 
-def apply_forces_cycle():
-    pass
+    # prepare for next cycle
+    S = S / 2
+    P = P * P_rate
+    I = I * I_rate
+
+    subdivision_points_for_edge = update_edge_divisions(edges, subdivision_points_for_edge, P)
+    #print('C: {} P: {} S: {}'.format(cycle, P, S))
+
+    return subdivision_points_for_edge, S, P, I
