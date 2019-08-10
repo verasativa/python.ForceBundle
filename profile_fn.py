@@ -1,10 +1,8 @@
 import ForceBundleFunctionalNumba
-from functools import partial
 import networkx as nx
 from xml.dom.minidom import parse
 import xml.dom.minidom
-from numba import jitclass, int16
-import numpy as np
+from numba.typed import List
 
 # Build network
 network = nx.DiGraph()
@@ -39,9 +37,9 @@ for node in network.nodes(data=True):
 #data_nodes = np.array(data_nodes, dtype=[('x', 'f4'), ('y', 'f4')])
 
 # Build edges
-data_edges = []
+data_edges = List()
 count = 0
-limit = 5000
+limit = 10
 for source, target in network.edges:
     #data_edges.append((source, target))
     if count >= limit:
@@ -49,20 +47,21 @@ for source, target in network.edges:
     count += 1
     data_edges.append(ForceBundleFunctionalNumba.Edge(data_nodes[source], data_nodes[target]))
 
-# Set settings
-eps = 1e-6
-compatibility_threshold = 0.6
+# Set hyper-parameters:
+#
+# global bundling constant controlling edge stiffness
+K = 0.1
+# init.distance to move points
+S_initial = 0.1
+# init. subdivision number
+P_initial = 1
+# subdivision rate increase
+P_rate = 2
+# number of cycles to perform
+C = 6
+# init.number of iterations for cycle
+I_initial = 90
+# rate at which iteration number decreases i.e. 2 / 3
+I_rate = 0.6666667
 
-#edge_length = partial(ForceBundleFunctionalNumba.edge_length, eps)
-
-#angle_compatibility = partial(ForceBundleFunctionalNumba.angle_compatibility)
-
-#angle_compatibility(data_edges[69], data_edges[66])
-#scale_compatibility = partial(ForceBundleFunctionalNumba.scale_compatibility)
-
-#position_compatibility = partial(ForceBundleFunctionalNumba.position_compatibility)
-
-#are_compatible = partial(ForceBundleFunctionalNumba.are_compatible, compatibility_threshold)
-
-
-data = ForceBundleFunctionalNumba.compute_compatibility_list(data_edges)
+output = ForceBundleFunctionalNumba.forcebundle(data_edges, S_initial, I_initial, I_rate, P_initial, P_rate, C, K)
