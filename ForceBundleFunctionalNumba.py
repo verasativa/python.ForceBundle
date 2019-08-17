@@ -1,5 +1,5 @@
 import numpy as np
-from numba import jitclass, float32, jit, njit
+from numba import jitclass, float32, jit, njit, prange
 from numba.typed import Dict, List
 from numba.types import ListType, uint8, int16
 from functools import partial
@@ -61,6 +61,8 @@ def scale_compatibility(edge, oedge):
 #@profile
 @jit(float32(Point.class_type.instance_type, Point.class_type.instance_type), nopython=True, fastmath=True)
 def euclidean_distance(source, target):
+    if source.x == target.x and source.y == target.y:
+        return EPS
     return np.sqrt(np.power(source.x - target.x, 2) + np.power(source.y - target.y, 2))
 
 #@profile
@@ -80,6 +82,8 @@ def position_compatibility(edge, oedge):
 @jit(Point.class_type.instance_type(Point.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=True)
 def project_point_on_line(point, edge):
     L = math.sqrt(np.power(edge.target.x - edge.source.x, 2) + np.power((edge.target.y - edge.source.y), 2))
+    if L < EPS:
+        L = EPS
     r = ((edge.source.y - point.y) * (edge.source.y - edge.target.y) - (edge.source.x - point.x) * (edge.target.x - edge.source.x)) / np.power(L, 2)
     #print(r)
     return Point((edge.source.x + r * (edge.target.x - edge.source.x)),
@@ -119,27 +123,37 @@ def are_compatible(edge, oedge):
     #sys.exit()
     return score >= COMPATIBILITY_THRESHOLD
 
-@jit(ListType(ListType(int16))(ListType(Edge.class_type.instance_type)))
+#@jit(ListType(ListType(int16))(ListType(Edge.class_type.instance_type)), nopython=True)
 def compute_compatibility_list(data_edges):
     compatibility_list = List()
     for _ in data_edges:
         compatibility_list.append(List.empty_list(int16))
     total_edges = len(data_edges)
-    for e_idx in range(total_edges - 1):
-        for oe_idx in range(e_idx, total_edges):
-            if are_compatible(data_edges[e_idx], data_edges[oe_idx]):
-                compatibility_list[e_idx].append(oe_idx)
-                compatibility_list[oe_idx].append(e_idx)
+    for e_idx in tqdm(range(total_edges - 1), unit='Edges'):
+        compatibility_list = compute_compatibility_list_on_edge(data_edges, e_idx, compatibility_list, total_edges)
+#        for oe_idx in range(e_idx, total_edges):
+#            if are_compatible(data_edges[e_idx], data_edges[oe_idx]):
+#                compatibility_list[e_idx].append(oe_idx)
+#                compatibility_list[oe_idx].append(e_idx)
+    return compatibility_list
+
+@jit(ListType(ListType(int16))(ListType(Edge.class_type.instance_type), int16, ListType(ListType(int16)), int16), nopython=True)
+#@jit(nopython=True)
+def compute_compatibility_list_on_edge(data_edges, e_idx, compatibility_list, total_edges):
+    for oe_idx in range(e_idx, total_edges):
+        if are_compatible(data_edges[e_idx], data_edges[oe_idx]):
+            compatibility_list[e_idx].append(oe_idx)
+            compatibility_list[oe_idx].append(e_idx)
     return compatibility_list
 
 # Need to set types on var (they are not availables inside a jit function)
 pt_cls = Point.class_type.instance_type
 list_of_pts = ListType(pt_cls)
-@jit(ListType(ListType(Point.class_type.instance_type))(ListType(Edge.class_type.instance_type), uint8), nopython=True)
+#@jit(ListType(ListType(Point.class_type.instance_type))(ListType(Edge.class_type.instance_type), uint8), nopython=True)
 def build_edge_subdivisions(edges, P_initial=1):
     subdivision_points_for_edge = List.empty_list(list_of_pts)
 
-    for i in range(0, len(edges)):
+    for i in range(len(edges)):
         subdivision_points_for_edge.append(List.empty_list(pt_cls))
 
         if P_initial != 1:
@@ -171,7 +185,7 @@ def edge_midpoint(edge):
 
 @jit(nopython=True, fastmath=True)
 def update_edge_divisions(data_edges, subdivision_points_for_edge, P):
-    for edge_idx in range(0, len(data_edges)):
+    for edge_idx in range(len(data_edges)):
         if P == 1:
             subdivision_points_for_edge[edge_idx].append(data_edges[edge_idx].source)
             subdivision_points_for_edge[edge_idx].append(edge_midpoint(data_edges[edge_idx]))  # Pendiente
@@ -229,17 +243,24 @@ def apply_spring_force(subdivision_points_for_edge, edge_idx, i, kP):
 def custom_edge_length(edge):
     return math.sqrt(math.pow(edge.source.x - edge.target.x, 2) + math.pow(edge.source.y - edge.target.y, 2))
 
-@jit(ForceFactors.class_type.instance_type(ListType(ListType(Point.class_type.instance_type)), ListType(ListType(int16)), int16, int16), nopython=True, fastmath=True) #
-def apply_electrostatic_force(subdivision_points_for_edge, compatibility_list_for_edge, edge_idx, i):
+@jit(ForceFactors.class_type.instance_type(ListType(ListType(Point.class_type.instance_type)), ListType(ListType(int16)), int16, int16, ListType(float32)), nopython=True, fastmath=True) #
+def apply_electrostatic_force(subdivision_points_for_edge, compatibility_list_for_edge, edge_idx, i, weights):
     #sum_of_forces = ForceFactors(0.0, 0.0)
     sum_of_forces_x = 0.0
     sum_of_forces_y = 0.0
     compatible_edges_list = compatibility_list_for_edge[edge_idx]
+    use_weights = True if len(weights) > 0 else False
 
-    for oe in range(0, len(compatible_edges_list)):
-        force = ForceFactors(subdivision_points_for_edge[compatible_edges_list[oe]][i].x - subdivision_points_for_edge[edge_idx][i].x,
-                             subdivision_points_for_edge[compatible_edges_list[oe]][i].y - subdivision_points_for_edge[edge_idx][i].y
-                             )
+    for oe in range(len(compatible_edges_list)):
+        if use_weights:
+            force = ForceFactors((subdivision_points_for_edge[compatible_edges_list[oe]][i].x - subdivision_points_for_edge[edge_idx][i].x)  * weights[oe],
+                                 (subdivision_points_for_edge[compatible_edges_list[oe]][i].y - subdivision_points_for_edge[edge_idx][i].y)  * weights[oe]
+                                 )
+        else:
+            force = ForceFactors((subdivision_points_for_edge[compatible_edges_list[oe]][i].x - subdivision_points_for_edge[edge_idx][i].x),
+                                 (subdivision_points_for_edge[compatible_edges_list[oe]][i].y - subdivision_points_for_edge[edge_idx][i].y)
+                                 )
+
 
         if ((math.fabs(force.x) > EPS) or (math.fabs(force.y) > EPS)):
             diff = (1 / math.pow(custom_edge_length(Edge(subdivision_points_for_edge[compatible_edges_list[oe]][i],
@@ -253,7 +274,7 @@ def apply_electrostatic_force(subdivision_points_for_edge, compatibility_list_fo
     return ForceFactors(sum_of_forces_x, sum_of_forces_y)
 
 @jit(nopython=True, fastmath=True)
-def apply_resulting_forces_on_subdivision_points(data_edges, subdivision_points_for_edge, compatibility_list_for_edge, edge_idx, K, P, S):
+def apply_resulting_forces_on_subdivision_points(data_edges, subdivision_points_for_edge, compatibility_list_for_edge, edge_idx, K, P, S, weights):
     # kP = K / | P | (number of segments), where | P | is the initial length of edge P.
     kP = K / (edge_length(data_edges[edge_idx]) * (P + 1))
 
@@ -261,14 +282,11 @@ def apply_resulting_forces_on_subdivision_points(data_edges, subdivision_points_
     resulting_forces_for_subdivision_points = [ForceFactors(0.0, 0.0)]
 
     for i in range(1, P + 1):
-        resulting_force = ForceFactors(0.0, 0.0)
         spring_force = apply_spring_force(subdivision_points_for_edge, edge_idx, i, kP)
-        electrostatic_force = apply_electrostatic_force(subdivision_points_for_edge, compatibility_list_for_edge, edge_idx, i)
+        electrostatic_force = apply_electrostatic_force(subdivision_points_for_edge, compatibility_list_for_edge, edge_idx, i, weights)
 
         resulting_force = ForceFactors(S * (spring_force.x + electrostatic_force.x),
                                        S * (spring_force.y + electrostatic_force.y))
-        #resulting_force.x = S * (spring_force.x + electrostatic_force.x)
-        #resulting_force.y = S * (spring_force.y + electrostatic_force.y)
 
         resulting_forces_for_subdivision_points.append(resulting_force)
 
@@ -277,62 +295,34 @@ def apply_resulting_forces_on_subdivision_points(data_edges, subdivision_points_
 
     return resulting_forces_for_subdivision_points
 
-#@jit(nopython=True)
-def forcebundle(edges, S_initial, I_initial, I_rate, P_initial, P_rate, C, K):
+# No numba, so we have tqdm
+def forcebundle(edges, S_initial, I_initial, I_rate, P_initial, P_rate, C, K, weights):
     S = S_initial
     I = I_initial
     P = P_initial
 
     subdivision_points_for_edge = build_edge_subdivisions(edges, P_initial)
-    #self.initialize_edge_subdivisions()
     compatibility_list_for_edge = compute_compatibility_list(edges)
-    #self.initialize_compatibility_lists() # Joined to compute_compatibility_list
     subdivision_points_for_edge = update_edge_divisions(edges, subdivision_points_for_edge, P)
-    #self.update_edge_divisions(P)
-    #self.compute_compatibility_lists()
 
-
-    # TODO: remove range(0, n) to range(n)
-    for cycle in tqdm(range(0, C), unit='cycle'):
-        subdivision_points_for_edge, S, P, I = apply_forces_cycle(edges, subdivision_points_for_edge, compatibility_list_for_edge, K, P, P_rate, I, I_rate, S)
-    #for cycle in range(0, C):
-        # for iteration in range(math.ceil(I)):
-        #     forces = {}
-        #     for edge_idx in range(0, len(edges)):
-        #         forces[edge_idx] = apply_resulting_forces_on_subdivision_points(edges, subdivision_points_for_edge, compatibility_list_for_edge, edge_idx, K, P, S)
-        #         for i in range(P):
-        #             subdivision_points_for_edge[edge_idx][i] = Point(
-        #                 subdivision_points_for_edge[edge_idx][i].x + forces[edge_idx][i].x,
-        #                 subdivision_points_for_edge[edge_idx][i].y + forces[edge_idx][i].y
-        #             )
-        #             #self.subdivision_points_for_edge[e][i].x += forces[e][i].x
-        #             #self.subdivision_points_for_edge[e][i].y += forces[e][i].y
-        #
-        # # prepare for next cycle
-        # S = S / 2
-        # P = P * P_rate
-        # I = I * I_rate
-        #
-        # subdivision_points_for_edge = update_edge_divisions(edges, subdivision_points_for_edge, P)
-        # print('C: {} P: {} S: {}'.format(cycle, P, S))
+    for _cycle in tqdm(range(C), unit='cycle'):
+        subdivision_points_for_edge, S, P, I = apply_forces_cycle(edges, subdivision_points_for_edge, compatibility_list_for_edge, K, P, P_rate, I, I_rate, S, weights)
 
     return subdivision_points_for_edge
 
 @jit(nopython=True)
-def apply_forces_cycle(edges, subdivision_points_for_edge, compatibility_list_for_edge, K, P, P_rate, I, I_rate, S):
+def apply_forces_cycle(edges, subdivision_points_for_edge, compatibility_list_for_edge, K, P, P_rate, I, I_rate, S, weights):
     for iteration in range(math.ceil(I)):
         forces = List()
-        for edge_idx in range(0, len(edges)):
+        for edge_idx in range(len(edges)):
             forces.append(apply_resulting_forces_on_subdivision_points(edges, subdivision_points_for_edge,
                                                                             compatibility_list_for_edge, edge_idx, K, P,
-                                                                            S))
+                                                                            S, weights))
             for i in range(P):
                 subdivision_points_for_edge[edge_idx][i] = Point(
                     subdivision_points_for_edge[edge_idx][i].x + forces[edge_idx][i].x,
                     subdivision_points_for_edge[edge_idx][i].y + forces[edge_idx][i].y
                 )
-                # self.subdivision_points_for_edge[e][i].x += forces[e][i].x
-                # self.subdivision_points_for_edge[e][i].y += forces[e][i].y
 
     # prepare for next cycle
     S = S / 2
