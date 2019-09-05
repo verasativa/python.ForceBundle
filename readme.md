@@ -1,7 +1,7 @@
 # python.ForceBundle
 
 #### Python / numba [Force-directed Edge Bungling for Graph Visualization](https://classes.engineering.wustl.edu/cse557/readings/holten-edgebundling.pdf)
-![](readme_img/trips-comparative.png)
+![](doc_assets/trips-comparative.png)
 
 ## Description
 python.ForceBundle is a python implementation of [Force-directed Edge Bungling for Graph Visualization](https://classes.engineering.wustl.edu/cse557/readings/holten-edgebundling.pdf), which trough organic bundling of edges, make easy to visualize patterns on otherwise visually clutter diagrams.
@@ -46,15 +46,20 @@ The **most important parameter** is the **initial step size** used to move the s
 
  - Be sure you edges are going trough ```is_long_enough(edge)``` or an equibalent (if you using ```array2edges```, it does it for you)
  - May be the float point:
-  1. Set ```FASTMATH=False```
-  2. If still fails try replacing jit spec at ```Point``` class from: 
-  ```Python
-@jitclass([('x', float32), ('y', float32)])
-```
-to:
-```Python
-@jitclass([('x', float64), ('y', float64)])
-```
+    1. Set ```FASTMATH=False```
+    2. If still fails try replacing jit spec at ```Point``` class from: 
+    
+        ```Python
+        @jitclass([('x', float32), ('y', float32)])
+        ```
+        to:
+            
+        ```Python
+        @jitclass([('x', float64), ('y', float64)])
+        ```
+
+### Execution flow chart
+If you are confused about the execution order of each function, check the [execution flow chart](doc_assets/Force-directedEdgeBundling.png).
 
 ### General debugging advice 
 [Numba](https://numba.pydata.org/) function are opaque and big datasets are slow to process without. Mi advice is to attack on both fronts:
@@ -62,7 +67,7 @@ to:
  1. Try to slice you edges until you you have a reasonable amount to process without numba , something like:
     ```Python
      slide = data[:1000]
-     # If don't crash then try:
+     # If doesn't crash then try:
      slide = data[1000:2000] 
      ```
  2. Go commenting the ````@jit```` line on the chain of functions until you find the issue on plain python

@@ -1,21 +1,33 @@
-import numpy as np
 from numba import jitclass, float32, jit, prange, float64, njit
 from numba.typed import List
 from numba.types import ListType, int16, uint8
 from tqdm.auto import tqdm
-import math, sys
+import math
 
-# TODO: set a proper way of setting hyperparameters
-# init. subdivision number
+# Hyper-parameters
+#
+# global bundling constant controlling edge stiffness
+K = 0.1
+# initial distance to move points
+S_initial = 0.1
+# initial subdivision number
 P_initial = 1
 # subdivision rate increase
 P_rate = 2
 # number of cycles to perform
 C = 6
+# initial number of iterations for cycle
+I_initial = 90
+# rate at which iteration number decreases i.e. 2/3
+I_rate = 0.6666667
 
-EPS = 1e-6
-COMPATIBILITY_THRESHOLD = 0.6
+compatibility_threshold = 0.6
+eps = 1e-6
+
+# Execution settings
 FASTMATH = True
+PARALLEL = False # On usage.ipynb benchmark went from 4min 35s to 4min 41s (slightly worse)
+NOGIL = False # On usage.ipynb benchmark went from 4min 38s to 4min 35s (nano improve, thus ignored)
 
 
 @jitclass([('x', float32), ('y', float32)])
@@ -35,21 +47,21 @@ class Edge:
 ForceFactors = Point
 
 
-@jit(Point.class_type.instance_type(Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH)
+@jit(Point.class_type.instance_type(Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH, nogil=True)
 def edge_as_vector(edge):
     return Point(edge.target.x - edge.source.x, edge.target.y - edge.source.y)
 
 
-@jit(float32(Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH)
+@jit(float32(Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH, nogil=True)
 def edge_length(edge):
     # handling nodes that are the same location, so that K / edge_length != Inf
-    if (abs(edge.source.x - edge.target.x)) < EPS and (abs(edge.source.y - edge.target.y)) < EPS:
-        return EPS
+    if (abs(edge.source.x - edge.target.x)) < eps and (abs(edge.source.y - edge.target.y)) < eps:
+        return eps
 
-    return np.sqrt(np.power(edge.source.x - edge.target.x, 2) + np.power(edge.source.y - edge.target.y, 2))
+    return math.sqrt(math.pow(edge.source.x - edge.target.x, 2) + math.pow(edge.source.y - edge.target.y, 2))
 
 
-@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH)
+@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH, nogil=True)
 def angle_compatibility(edge, oedge):
     v1 = edge_as_vector(edge)
     v2 = edge_as_vector(oedge)
@@ -57,18 +69,18 @@ def angle_compatibility(edge, oedge):
     return math.fabs(dot_product / (edge_length(edge) * edge_length(oedge)))
 
 
-@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH)
+@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH, nogil=True)
 def scale_compatibility(edge, oedge):
     lavg = (edge_length(edge) + edge_length(oedge)) / 2.0
     return 2.0 / (lavg/min(edge_length(edge), edge_length(oedge)) + max(edge_length(edge), edge_length(oedge))/lavg)
 
 
-@jit(float32(Point.class_type.instance_type, Point.class_type.instance_type), nopython=True, fastmath=FASTMATH)
+@jit(float32(Point.class_type.instance_type, Point.class_type.instance_type), nopython=True, fastmath=FASTMATH, nogil=True)
 def euclidean_distance(source, target):
-    return np.sqrt(np.power(source.x - target.x, 2) + np.power(source.y - target.y, 2))
+    return math.sqrt(math.pow(source.x - target.x, 2) + math.pow(source.y - target.y, 2))
 
 
-@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH)
+@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH, nogil=True)
 def position_compatibility(edge, oedge):
         lavg = (edge_length(edge) + edge_length(oedge)) / 2.0
         midP = Point((edge.source.x + edge.target.x) / 2.0,
@@ -79,21 +91,21 @@ def position_compatibility(edge, oedge):
         return lavg / (lavg + euclidean_distance(midP, midQ))
 
 
-@jit(Point.class_type.instance_type(Point.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH)
+@jit(Point.class_type.instance_type(Point.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH, nogil=True)
 def project_point_on_line(point, edge):
-    L = math.sqrt(np.power(edge.target.x - edge.source.x, 2) + np.power((edge.target.y - edge.source.y), 2))
-    r = ((edge.source.y - point.y) * (edge.source.y - edge.target.y) - (edge.source.x - point.x) * (edge.target.x - edge.source.x)) / np.power(L, 2)
+    L = math.sqrt(math.pow(edge.target.x - edge.source.x, 2) + math.pow((edge.target.y - edge.source.y), 2))
+    r = ((edge.source.y - point.y) * (edge.source.y - edge.target.y) - (edge.source.x - point.x) * (edge.target.x - edge.source.x)) / math.pow(L, 2)
     return Point((edge.source.x + r * (edge.target.x - edge.source.x)),
                  (edge.source.y + r * (edge.target.y - edge.source.y)))
 
 
-@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH)
+@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH, nogil=True)
 def edge_visibility(edge, oedge):
     # send actual edge points positions
     I0 = project_point_on_line(oedge.source, edge)
     I1 = project_point_on_line(oedge.target, edge)
     divisor = euclidean_distance(I0, I1)
-    divisor = divisor if divisor != 0 else EPS
+    divisor = divisor if divisor != 0 else eps
 
     midI = Point((I0.x + I1.x) / 2.0, (I0.y + I1.y) / 2.0)
 
@@ -103,13 +115,12 @@ def edge_visibility(edge, oedge):
     return max(0, 1 - 2 * euclidean_distance(midP, midI) / divisor)
 
 
-@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH)
+@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH, nogil=True)
 def visibility_compatibility(edge, oedge):
-    # TODO: Implement both directions at edge_visibility
     return min(edge_visibility(edge, oedge), edge_visibility(oedge, edge))
 
 
-@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH)
+@jit(float32(Edge.class_type.instance_type, Edge.class_type.instance_type), nopython=True, fastmath=FASTMATH, nogil=NOGIL)
 def are_compatible(edge, oedge):
     angles_score = angle_compatibility(edge, oedge)
     scales_score = scale_compatibility(edge, oedge)
@@ -118,26 +129,26 @@ def are_compatible(edge, oedge):
 
     score = (angles_score * scales_score * positi_score * visivi_score)
 
-    return score >= COMPATIBILITY_THRESHOLD
+    return score >= compatibility_threshold
 
 
 # No numba, so we have tqdm
-def compute_compatibility_list(data_edges):
+def compute_compatibility_list(edges):
     compatibility_list = List()
-    for _ in data_edges:
+    for _ in edges:
         compatibility_list.append(List.empty_list(int16))
 
-    total_edges = len(data_edges)
+    total_edges = len(edges)
     for e_idx in tqdm(range(total_edges - 1), unit='Edges'):
-        compatibility_list = compute_compatibility_list_on_edge(data_edges, e_idx, compatibility_list, total_edges)
+        compatibility_list = compute_compatibility_list_on_edge(edges, e_idx, compatibility_list, total_edges)
 
     return compatibility_list
 
 
 @jit(ListType(ListType(int16))(ListType(Edge.class_type.instance_type), int16, ListType(ListType(int16)), int16), nopython=True)
-def compute_compatibility_list_on_edge(data_edges, e_idx, compatibility_list, total_edges):
+def compute_compatibility_list_on_edge(edges, e_idx, compatibility_list, total_edges):
     for oe_idx in range(e_idx, total_edges):
-        if are_compatible(data_edges[e_idx], data_edges[oe_idx]):
+        if are_compatible(edges[e_idx], edges[oe_idx]):
             compatibility_list[e_idx].append(oe_idx)
             compatibility_list[oe_idx].append(e_idx)
     return compatibility_list
@@ -159,10 +170,10 @@ def build_edge_subdivisions(edges, P_initial=1):
     return subdivision_points_for_edge
 
 
-@jit(nopython=True, fastmath=FASTMATH)
+@jit(nopython=True, fastmath=FASTMATH, parallel=PARALLEL)
 def compute_divided_edge_length(subdivision_points_for_edge, edge_idx):
     length = 0
-    for i in range(1, len(subdivision_points_for_edge[edge_idx])):
+    for i in prange(1, len(subdivision_points_for_edge[edge_idx])):
         segment_length = euclidean_distance(subdivision_points_for_edge[edge_idx][i],
                                             subdivision_points_for_edge[edge_idx][i - 1])
         length += segment_length
@@ -179,18 +190,18 @@ def edge_midpoint(edge):
 
 
 @jit(nopython=True, fastmath=True)
-def update_edge_divisions(data_edges, subdivision_points_for_edge, P):
-    for edge_idx in range(len(data_edges)):
+def update_edge_divisions(edges, subdivision_points_for_edge, P):
+    for edge_idx in range(len(edges)):
         if P == 1:
-            subdivision_points_for_edge[edge_idx].append(data_edges[edge_idx].source)
-            subdivision_points_for_edge[edge_idx].append(edge_midpoint(data_edges[edge_idx]))
-            subdivision_points_for_edge[edge_idx].append(data_edges[edge_idx].target)
+            subdivision_points_for_edge[edge_idx].append(edges[edge_idx].source)
+            subdivision_points_for_edge[edge_idx].append(edge_midpoint(edges[edge_idx]))
+            subdivision_points_for_edge[edge_idx].append(edges[edge_idx].target)
         else:
             divided_edge_length = compute_divided_edge_length(subdivision_points_for_edge, edge_idx)
             segment_length = divided_edge_length / (P + 1)
             current_segment_length = segment_length
             new_subdivision_points = List()
-            new_subdivision_points.append(data_edges[edge_idx].source)  # source
+            new_subdivision_points.append(edges[edge_idx].source)  # source
             for i in range(1, len(subdivision_points_for_edge[edge_idx])):
                 old_segment_length = euclidean_distance(subdivision_points_for_edge[edge_idx][i],
                                                         subdivision_points_for_edge[edge_idx][i - 1])
@@ -212,13 +223,13 @@ def update_edge_divisions(data_edges, subdivision_points_for_edge, P):
 
                 current_segment_length -= old_segment_length
 
-            new_subdivision_points.append(data_edges[edge_idx].target)  # target
+            new_subdivision_points.append(edges[edge_idx].target)  # target
             subdivision_points_for_edge[edge_idx] = new_subdivision_points
 
     return subdivision_points_for_edge
 
 
-@jit(nopython=True, fastmath=FASTMATH)
+@jit(nopython=True, fastmath=FASTMATH, nogil=NOGIL)
 def apply_spring_force(subdivision_points_for_edge, edge_idx, i, kP):
     prev = subdivision_points_for_edge[edge_idx][i - 1]
     next_ = subdivision_points_for_edge[edge_idx][i + 1]
@@ -234,7 +245,7 @@ def apply_spring_force(subdivision_points_for_edge, edge_idx, i, kP):
     return ForceFactors(x, y)
 
 
-@jit(nopython=True, fastmath=FASTMATH)
+@jit(nopython=True, fastmath=FASTMATH, nogil=NOGIL)
 def custom_edge_length(edge):
     return math.sqrt(math.pow(edge.source.x - edge.target.x, 2) + math.pow(edge.source.y - edge.target.y, 2))
 
@@ -256,10 +267,8 @@ def apply_electrostatic_force(subdivision_points_for_edge, compatibility_list_fo
                                  (subdivision_points_for_edge[compatible_edges_list[oe]][i].y - subdivision_points_for_edge[edge_idx][i].y)
                                  )
 
-        if (math.fabs(force.x) > EPS) or (math.fabs(force.y) > EPS):
-            # TODO: que hace este pow aquí?
-            divisor = math.pow(custom_edge_length(Edge(subdivision_points_for_edge[compatible_edges_list[oe]][i],
-                                                         subdivision_points_for_edge[edge_idx][i])), 1)
+        if (math.fabs(force.x) > eps) or (math.fabs(force.y) > eps):
+            divisor = custom_edge_length(Edge(subdivision_points_for_edge[compatible_edges_list[oe]][i], subdivision_points_for_edge[edge_idx][i]))
             diff = (1 / divisor)
 
             sum_of_forces_x += force.x * diff
@@ -268,7 +277,6 @@ def apply_electrostatic_force(subdivision_points_for_edge, compatibility_list_fo
     return ForceFactors(sum_of_forces_x, sum_of_forces_y)
 
 
-# TODO: rename data_edges to edges
 @jit(nopython=True, fastmath=FASTMATH)
 def apply_resulting_forces_on_subdivision_points(edges, subdivision_points_for_edge, compatibility_list_for_edge, edge_idx, K, P, S, weights):
     # kP = K / | P | (number of segments), where | P | is the initial length of edge P.
@@ -293,7 +301,7 @@ def apply_resulting_forces_on_subdivision_points(edges, subdivision_points_for_e
     return resulting_forces_for_subdivision_points
 
 # No numba, so we have tqdm
-def forcebundle(edges, S_initial, I_initial, I_rate, P_initial, P_rate, C, K, weights = List.empty_list(float32)):
+def forcebundle(edges, weights = List.empty_list(float32)):
     S = S_initial
     I = I_initial
     P = P_initial
@@ -312,11 +320,11 @@ def forcebundle(edges, S_initial, I_initial, I_rate, P_initial, P_rate, C, K, we
 def apply_forces_cycle(edges, subdivision_points_for_edge, compatibility_list_for_edge, K, P, P_rate, I, I_rate, S, weights):
     for _iteration in range(math.ceil(I)):
         forces = List()
-        for edge_idx in range(len(edges)): # TODO: join with following loop
+        for edge_idx in range(len(edges)):
             forces.append(apply_resulting_forces_on_subdivision_points(edges, subdivision_points_for_edge,
                                                                             compatibility_list_for_edge, edge_idx, K, P,
                                                                             S, weights))
-        for edge_idx in range(len(edges)):
+
             for i in range(P + 1): # We want from 0 to P
                 subdivision_points_for_edge[edge_idx][i] = Point(
                     subdivision_points_for_edge[edge_idx][i].x + forces[edge_idx][i].x,
@@ -343,22 +351,25 @@ def is_long_enough(edge):
         return False
     # No EPS euclidean distance
     raw_lenght = math.sqrt(math.pow(edge.target.x - edge.source.x, 2) + math.pow(edge.target.y - edge.source.y, 2))
-    if raw_lenght < (EPS * P_initial * P_rate * C):
+    if raw_lenght < (eps * P_initial * P_rate * C):
         return False
     else:
         return True
 
-def get_empty_edge_list():
-    return List.empty_list(Edge.class_type.instance_type)
 
 def net2edges(network, positions):
-    edges =  get_empty_edge_list()
+    edges =  List.empty_list(Edge.class_type.instance_type)
     for edge in network.edges:
         source = Point(positions[edge[0]][0], positions[edge[0]][1])
         target = Point(positions[edge[1]][0], positions[edge[1]][1])
-        edges.append(Edge(source, target))
+        edge = Edge(source, target)
+        if is_long_enough(edge):
+            edges.append(edge)
 
     return edges
+
+# TODO: add a edges2net method
+# Should do the networkx import at function? (so networkx it's only needed if function is used)
 
 
 # Need to set types on var (they are not available inside a jit function)
@@ -376,7 +387,7 @@ def array2edges(flat_array):
     return edges
 
 
-# TODO: perhaps should use native python lists?
+@jit(nopython=True)
 def edges2lines(edges):
     lines = List()
     for edge in edges:
@@ -385,5 +396,3 @@ def edges2lines(edges):
         line.append(Point(edge.target.x, edge.target.y))
         lines.append(line)
     return lines
-
-# TODO: add the functions diagram
