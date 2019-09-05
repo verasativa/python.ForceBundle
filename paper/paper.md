@@ -1,4 +1,19 @@
-# Force-directed Edge Bungling for Python
+---
+title: 'Force-directed Edge Bungling for Python'
+tags:
+  - networks
+  - visualizations
+  - Python
+authors:
+  - name: Vera Sativa
+    orcid: 0000-0001-9138-7375
+    affiliation: 1
+affiliations:
+ - name: Fellow student, Bibloteca Gabriela Mistral, Ñuñoa, RM, Chile
+   index: 1
+date: 5 September 2019
+bibliography: paper.bib
+---
 
 ## Background
 
@@ -11,7 +26,10 @@ Force-directed Edge Bungling uses a self-organizing approach to bundling in whic
 Inputs
 Subdivisions
 ### Compatibility measures
-
+ - Angle
+ - Scale
+ - Position
+ - Visivility
 ## Python implementation
 
 ## Acknowledgements
