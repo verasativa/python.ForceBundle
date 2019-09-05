@@ -357,8 +357,15 @@ def is_long_enough(edge):
         return True
 
 
+# Need to set types on var (they are not available inside a jit function)
+edge_class = Edge.class_type.instance_type
+@jit(nopython=True)
+def get_empty_edge_list():
+    return List.empty_list(edge_class)
+
+
 def net2edges(network, positions):
-    edges =  List.empty_list(Edge.class_type.instance_type)
+    edges = get_empty_edge_list()
     for edge in network.edges:
         source = Point(positions[edge[0]][0], positions[edge[0]][1])
         target = Point(positions[edge[1]][0], positions[edge[1]][1])
@@ -368,15 +375,14 @@ def net2edges(network, positions):
 
     return edges
 
+
 # TODO: add a edges2net method
 # Should do the networkx import at function? (so networkx it's only needed if function is used)
 
 
-# Need to set types on var (they are not available inside a jit function)
-edge_class = Edge.class_type.instance_type
 @jit(nopython=True)
 def array2edges(flat_array):
-    edges =  List.empty_list(edge_class)
+    edges =  get_empty_edge_list()
     for edge_idx in range(len(flat_array)):
         source = Point(flat_array[edge_idx][0], flat_array[edge_idx][1])
         target = Point(flat_array[edge_idx][2], flat_array[edge_idx][3])
