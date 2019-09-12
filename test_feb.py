@@ -14,6 +14,10 @@ class TestUM(unittest.TestCase):
                 edge = feb.Edge(source, target)
                 edges.append(edge)
 
+        # Hyper-paramenters
+        feb.S_initial = .05
+        feb.I_initial = 60
+        
         # Apply main algorithm
         bundled_lines = feb.forcebundle(edges)
 

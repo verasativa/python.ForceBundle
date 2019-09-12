@@ -147,7 +147,7 @@ def compute_compatibility_list(edges):
 
 @jit(ListType(ListType(int16))(ListType(Edge.class_type.instance_type), int16, ListType(ListType(int16)), int16), nopython=True)
 def compute_compatibility_list_on_edge(edges, e_idx, compatibility_list, total_edges):
-    for oe_idx in range(e_idx, total_edges):
+    for oe_idx in range(e_idx + 1, total_edges):
         if are_compatible(edges[e_idx], edges[oe_idx]):
             compatibility_list[e_idx].append(oe_idx)
             compatibility_list[oe_idx].append(e_idx)
