@@ -9,15 +9,15 @@ class TestUM(unittest.TestCase):
             edges = feb.get_empty_edge_list()
 
             for row in csvreader:
-                source = feb.Point(float(row[0]), float(row[1]))
-                target = feb.Point(float(row[2]), float(row[3]))
+                source = feb.Point(float(row[0]), float(row[1]) * -1)
+                target = feb.Point(float(row[2]), float(row[3]) * -1)
                 edge = feb.Edge(source, target)
                 edges.append(edge)
 
         # Hyper-paramenters
         feb.S_initial = .05
         feb.I_initial = 60
-        
+
         # Apply main algorithm
         bundled_lines = feb.forcebundle(edges)
 
